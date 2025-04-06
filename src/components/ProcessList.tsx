@@ -68,6 +68,7 @@ const ProcessList: React.FC = () => {
                 <TableHead>Burst</TableHead>
                 <TableHead>Priority</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead>CPU</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
@@ -76,10 +77,15 @@ const ProcessList: React.FC = () => {
                 // Determine process status
                 let status = "Waiting";
                 let statusClass = "text-gray-500";
+                let cpuDisplay = "-";
                 
-                if (state.currentProcess?.id === process.id) {
+                // Find if this process is currently running on any CPU
+                const runningProcess = state.currentProcesses.find(p => p?.id === process.id);
+                
+                if (runningProcess) {
                   status = "Running";
                   statusClass = "text-green-600 font-medium";
+                  cpuDisplay = `CPU ${runningProcess.cpuId !== undefined ? runningProcess.cpuId + 1 : '?'}`;
                 } else if (state.readyQueue.some(p => p.id === process.id)) {
                   status = "Ready";
                   statusClass = "text-blue-600";
@@ -92,12 +98,13 @@ const ProcessList: React.FC = () => {
                 }
 
                 return (
-                  <TableRow key={process.id} className={process.isRunning ? "running-process" : ""}>
+                  <TableRow key={process.id} className={runningProcess ? "bg-gray-50" : ""}>
                     <TableCell className="font-medium">{process.name}</TableCell>
                     <TableCell>{process.arrivalTime}</TableCell>
                     <TableCell>{process.burstTime}</TableCell>
                     <TableCell>{process.priority}</TableCell>
                     <TableCell className={statusClass}>{status}</TableCell>
+                    <TableCell>{cpuDisplay}</TableCell>
                     <TableCell className="text-right">
                       {state.currentTime === 0 && (
                         <>

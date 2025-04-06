@@ -12,6 +12,7 @@ type SchedulerAction =
   | { type: "STEP_SIMULATION" }
   | { type: "SET_ALGORITHM"; algorithm: SchedulingAlgorithm }
   | { type: "SET_QUANTUM_TIME"; quantumTime: number }
+  | { type: "SET_CPU_COUNT"; cpuCount: number }
   | { type: "TICK" }
   | { type: "REMOVE_PROCESS"; processId: string }
   | { type: "EDIT_PROCESS"; process: Process };
@@ -20,10 +21,11 @@ const initialState: SchedulerState = {
   processes: [],
   readyQueue: [],
   completedProcesses: [],
-  currentProcess: null,
+  currentProcesses: [null],
+  cpuCount: 1,
   currentTime: 0,
   quantumTime: 2,
-  quantumLeft: 2,
+  quantumLeft: [2],
   isRunning: false,
   algorithm: "FCFS",
 };
@@ -55,7 +57,9 @@ const schedulerReducer = (state: SchedulerState, action: SchedulerAction): Sched
         ...state,
         processes: state.processes.filter(p => p.id !== action.processId),
         readyQueue: state.readyQueue.filter(p => p.id !== action.processId),
-        currentProcess: state.currentProcess?.id === action.processId ? null : state.currentProcess,
+        currentProcesses: state.currentProcesses.map(p => 
+          p?.id === action.processId ? null : p
+        ),
       };
     }
 
@@ -73,9 +77,48 @@ const schedulerReducer = (state: SchedulerState, action: SchedulerAction): Sched
         readyQueue: state.readyQueue.map(p => 
           p.id === updatedProcess.id ? updatedProcess : p
         ),
-        currentProcess: state.currentProcess?.id === updatedProcess.id 
-          ? updatedProcess 
-          : state.currentProcess,
+        currentProcesses: state.currentProcesses.map(p => 
+          p?.id === updatedProcess.id ? updatedProcess : p
+        ),
+      };
+    }
+
+    case "SET_CPU_COUNT": {
+      const newCpuCount = action.cpuCount;
+      
+      // Adjust currentProcesses and quantumLeft arrays to match the new CPU count
+      let currentProcesses = [...state.currentProcesses];
+      let quantumLeft = [...state.quantumLeft];
+      
+      // If increasing CPU count, add nulls and full quantum times
+      if (newCpuCount > state.cpuCount) {
+        for (let i = state.cpuCount; i < newCpuCount; i++) {
+          currentProcesses.push(null);
+          quantumLeft.push(state.quantumTime);
+        }
+      } 
+      // If decreasing CPU count, remove elements and put running processes back in the ready queue
+      else if (newCpuCount < state.cpuCount) {
+        const removedProcesses = currentProcesses.splice(newCpuCount)
+          .filter((p): p is Process => p !== null);
+        
+        quantumLeft.splice(newCpuCount);
+        
+        // Put removed running processes back in the ready queue
+        return {
+          ...state,
+          cpuCount: newCpuCount,
+          currentProcesses,
+          quantumLeft,
+          readyQueue: [...state.readyQueue, ...removedProcesses],
+        };
+      }
+      
+      return {
+        ...state,
+        cpuCount: newCpuCount,
+        currentProcesses,
+        quantumLeft,
       };
     }
 
@@ -90,6 +133,7 @@ const schedulerReducer = (state: SchedulerState, action: SchedulerAction): Sched
         turnaroundTime: undefined,
         responseTime: undefined,
         isRunning: false,
+        cpuId: undefined,
       }));
       
       return {
@@ -97,9 +141,9 @@ const schedulerReducer = (state: SchedulerState, action: SchedulerAction): Sched
         processes: resetProcesses,
         readyQueue: [],
         completedProcesses: [],
-        currentProcess: null,
+        currentProcesses: Array(state.cpuCount).fill(null),
+        quantumLeft: Array(state.cpuCount).fill(state.quantumTime),
         currentTime: 0,
-        quantumLeft: state.quantumTime,
         isRunning: false,
       };
     }
@@ -129,7 +173,7 @@ const schedulerReducer = (state: SchedulerState, action: SchedulerAction): Sched
       return {
         ...state,
         quantumTime: action.quantumTime,
-        quantumLeft: action.quantumTime,
+        quantumLeft: Array(state.cpuCount).fill(action.quantumTime),
       };
     }
 
@@ -142,65 +186,83 @@ const schedulerReducer = (state: SchedulerState, action: SchedulerAction): Sched
         p => p.arrivalTime === newTime && 
         !state.readyQueue.some(rp => rp.id === p.id) && 
         !state.completedProcesses.some(cp => cp.id === p.id) &&
-        p.id !== state.currentProcess?.id
+        !state.currentProcesses.some(cp => cp?.id === p.id)
       );
       
       // Add newly arrived processes to the ready queue
       let updatedReadyQueue = [...state.readyQueue, ...newArrivals];
       
-      let updatedCurrentProcess = { ...state.currentProcess } as Process | null;
+      // Create copies of current processes and quantum left arrays
+      let updatedCurrentProcesses = [...state.currentProcesses];
       let updatedCompletedProcesses = [...state.completedProcesses];
-      let newQuantumLeft = state.quantumLeft;
+      let newQuantumLeft = [...state.quantumLeft];
       
-      // If there's a current process running
-      if (updatedCurrentProcess) {
-        // Decrease remaining time by 1
-        updatedCurrentProcess.remainingTime -= 1;
-        newQuantumLeft -= 1;
+      // Process each CPU
+      for (let cpuId = 0; cpuId < state.cpuCount; cpuId++) {
+        // Get the current process for this CPU
+        let currentProcess = updatedCurrentProcesses[cpuId];
         
-        // If process is complete
-        if (updatedCurrentProcess.remainingTime <= 0) {
-          // Mark completion time
-          updatedCurrentProcess.finishTime = newTime;
-          updatedCurrentProcess.turnaroundTime = newTime - updatedCurrentProcess.arrivalTime;
-          updatedCurrentProcess.waitingTime = updatedCurrentProcess.turnaroundTime - updatedCurrentProcess.burstTime;
+        if (currentProcess) {
+          // Decrease remaining time by 1
+          currentProcess = { 
+            ...currentProcess, 
+            remainingTime: currentProcess.remainingTime - 1
+          };
           
-          // Add to completed processes
-          updatedCompletedProcesses.push(updatedCurrentProcess);
-          updatedCurrentProcess = null;
-          newQuantumLeft = state.quantumTime;
-        } 
-        // If using Round Robin and quantum is expired
-        else if (state.algorithm === "RoundRobin" && newQuantumLeft <= 0) {
-          // Move current process back to ready queue (at the end)
-          updatedReadyQueue.push(updatedCurrentProcess);
-          updatedCurrentProcess = null;
-          newQuantumLeft = state.quantumTime;
+          // Update the current process in the array
+          updatedCurrentProcesses[cpuId] = currentProcess;
+          
+          // Decrease quantum left for this CPU
+          newQuantumLeft[cpuId] = newQuantumLeft[cpuId] - 1;
+          
+          // If process is complete
+          if (currentProcess.remainingTime <= 0) {
+            // Mark completion time
+            currentProcess.finishTime = newTime;
+            currentProcess.turnaroundTime = newTime - currentProcess.arrivalTime;
+            currentProcess.waitingTime = currentProcess.turnaroundTime - currentProcess.burstTime;
+            
+            // Add to completed processes
+            updatedCompletedProcesses.push(currentProcess);
+            updatedCurrentProcesses[cpuId] = null;
+            newQuantumLeft[cpuId] = state.quantumTime;
+          } 
+          // If using Round Robin and quantum is expired
+          else if (state.algorithm === "RoundRobin" && newQuantumLeft[cpuId] <= 0) {
+            // Move current process back to ready queue (at the end)
+            updatedReadyQueue.push(currentProcess);
+            updatedCurrentProcesses[cpuId] = null;
+            newQuantumLeft[cpuId] = state.quantumTime;
+          }
         }
       }
       
-      // If there's no current process, select a new one
-      if (!updatedCurrentProcess && updatedReadyQueue.length > 0) {
-        const { process: nextProcess, newQuantumLeft: quantum } = getNextProcess(
-          updatedReadyQueue,
-          state.algorithm,
-          newTime,
-          state.quantumTime
-        );
-        
-        if (nextProcess) {
-          // Remove the selected process from ready queue
-          updatedReadyQueue = updatedReadyQueue.filter(p => p.id !== nextProcess.id);
+      // For each CPU that doesn't have a process, select a new one
+      for (let cpuId = 0; cpuId < state.cpuCount; cpuId++) {
+        if (!updatedCurrentProcesses[cpuId] && updatedReadyQueue.length > 0) {
+          const { process: nextProcess, newQuantumLeft: quantum } = getNextProcess(
+            updatedReadyQueue,
+            state.algorithm,
+            newTime,
+            state.quantumTime
+          );
           
-          // If this is the first time this process starts running, set its start time
-          if (nextProcess.startTime === undefined) {
-            nextProcess.startTime = newTime;
-            nextProcess.responseTime = newTime - nextProcess.arrivalTime;
+          if (nextProcess) {
+            // Remove the selected process from ready queue
+            updatedReadyQueue = updatedReadyQueue.filter(p => p.id !== nextProcess.id);
+            
+            // If this is the first time this process starts running, set its start time
+            if (nextProcess.startTime === undefined) {
+              nextProcess.startTime = newTime;
+              nextProcess.responseTime = newTime - nextProcess.arrivalTime;
+            }
+            
+            nextProcess.isRunning = true;
+            nextProcess.cpuId = cpuId;  // Assign CPU ID to the process
+            
+            updatedCurrentProcesses[cpuId] = nextProcess;
+            newQuantumLeft[cpuId] = quantum;
           }
-          
-          nextProcess.isRunning = true;
-          updatedCurrentProcess = nextProcess;
-          newQuantumLeft = quantum;
         }
       }
       
@@ -208,7 +270,7 @@ const schedulerReducer = (state: SchedulerState, action: SchedulerAction): Sched
         ...state,
         currentTime: newTime,
         readyQueue: updatedReadyQueue,
-        currentProcess: updatedCurrentProcess,
+        currentProcesses: updatedCurrentProcesses,
         completedProcesses: updatedCompletedProcesses,
         quantumLeft: newQuantumLeft,
         isRunning: action.type === "TICK" ? state.isRunning : false, // Stop after STEP

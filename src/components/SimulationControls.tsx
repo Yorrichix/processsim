@@ -16,6 +16,7 @@ import {
 const SimulationControls: React.FC = () => {
   const { state, dispatch } = useScheduler();
   const [quantumInput, setQuantumInput] = React.useState(state.quantumTime.toString());
+  const [cpuCountInput, setCpuCountInput] = React.useState(state.cpuCount.toString());
 
   const handleAlgorithmChange = (value: string) => {
     dispatch({ type: "SET_ALGORITHM", algorithm: value as SchedulingAlgorithm });
@@ -25,6 +26,13 @@ const SimulationControls: React.FC = () => {
     const quantum = parseInt(quantumInput);
     if (quantum > 0) {
       dispatch({ type: "SET_QUANTUM_TIME", quantumTime: quantum });
+    }
+  };
+
+  const handleCpuCountChange = () => {
+    const cpuCount = parseInt(cpuCountInput);
+    if (cpuCount > 0 && cpuCount <= 8) {  // Limit to 8 CPUs for UI reasons
+      dispatch({ type: "SET_CPU_COUNT", cpuCount });
     }
   };
 
@@ -82,6 +90,25 @@ const SimulationControls: React.FC = () => {
           </Select>
         </div>
         
+        <div className="space-y-2">
+          <Label htmlFor="cpuCount">Number of CPUs</Label>
+          <div className="flex space-x-2">
+            <Input
+              id="cpuCount"
+              type="number"
+              min="1"
+              max="8"
+              value={cpuCountInput}
+              onChange={(e) => setCpuCountInput(e.target.value)}
+              disabled={isSimulationActive}
+              className="flex-1"
+            />
+            <Button onClick={handleCpuCountChange} disabled={isSimulationActive}>
+              Set
+            </Button>
+          </div>
+        </div>
+        
         {state.algorithm === "RoundRobin" && (
           <div className="space-y-2">
             <Label htmlFor="quantum">Time Quantum</Label>
@@ -129,8 +156,13 @@ const SimulationControls: React.FC = () => {
         </Button>
       </div>
       
-      <div className="text-center text-xl font-semibold">
-        Current Time: {state.currentTime}
+      <div className="flex justify-between items-center">
+        <div className="text-center text-xl font-semibold">
+          Current Time: {state.currentTime}
+        </div>
+        <div className="text-center text-lg">
+          Active CPUs: {state.currentProcesses.filter(p => p !== null).length}/{state.cpuCount}
+        </div>
       </div>
     </div>
   );

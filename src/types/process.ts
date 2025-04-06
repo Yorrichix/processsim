@@ -13,6 +13,7 @@ export interface Process {
   turnaroundTime?: number;
   responseTime?: number;
   isRunning?: boolean;
+  cpuId?: number; // Track which CPU is running this process
 }
 
 export type SchedulingAlgorithm = 
@@ -26,10 +27,11 @@ export interface SchedulerState {
   processes: Process[];
   readyQueue: Process[];
   completedProcesses: Process[];
-  currentProcess: Process | null;
+  currentProcesses: (Process | null)[];  // Array of currently running processes, one per CPU
+  cpuCount: number;                     // Number of available CPUs
   currentTime: number;
   quantumTime: number;
-  quantumLeft: number;
+  quantumLeft: number[];                // Array of quantum time left per CPU
   isRunning: boolean;
   algorithm: SchedulingAlgorithm;
 }

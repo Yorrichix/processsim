@@ -3,30 +3,38 @@ import React from "react";
 import { useScheduler } from "../context/SchedulerContext";
 import { Process } from "../types/process";
 
+interface CpuTimelineEntry {
+  time: number;
+  processes: (Process | null)[];
+}
+
 const ProcessGanttChart: React.FC = () => {
   const { state } = useScheduler();
   const timelineRef = React.useRef<HTMLDivElement>(null);
   
-  // Combine completed and current processes for timeline
+  // Track execution history for Gantt chart
+  const [executionHistory, setExecutionHistory] = React.useState<CpuTimelineEntry[]>([]);
+  
+  // Combine all processes that are relevant for visualization
   const relevantProcesses = [
     ...state.completedProcesses,
-    ...(state.currentProcess ? [state.currentProcess] : []),
+    ...state.currentProcesses.filter((p): p is Process => p !== null),
   ];
   
-  // Track execution history for Gantt chart
-  const [executionHistory, setExecutionHistory] = React.useState<(Process | null)[]>([]);
-  
-  // Update execution history when time changes
+  // Update execution history when time or current processes change
   React.useEffect(() => {
     if (state.currentTime > executionHistory.length) {
       setExecutionHistory(prev => [
         ...prev, 
-        state.currentProcess
+        {
+          time: state.currentTime - 1,
+          processes: [...state.currentProcesses]
+        }
       ]);
     } else if (state.currentTime === 0) {
       setExecutionHistory([]);
     }
-  }, [state.currentTime, state.currentProcess]);
+  }, [state.currentTime, state.currentProcesses]);
   
   // Scroll to end of timeline when it updates
   React.useEffect(() => {
@@ -46,12 +54,6 @@ const ProcessGanttChart: React.FC = () => {
     );
   }
   
-  // Find processes that were executed at each time unit
-  const timelineBlocks = executionHistory.map((process, timeIndex) => ({
-    time: timeIndex,
-    process,
-  }));
-  
   return (
     <div className="bg-white rounded-lg shadow p-4 mt-4">
       <h2 className="text-xl font-semibold mb-4">Gantt Chart</h2>
@@ -61,27 +63,54 @@ const ProcessGanttChart: React.FC = () => {
         className="overflow-x-auto pb-4"
         style={{ maxWidth: "100%" }}
       >
-        <div className="inline-flex min-w-full">
-          {/* Gantt chart blocks */}
-          <div className="flex">
-            {timelineBlocks.map((block, index) => (
-              <div key={index} className="flex flex-col items-center" style={{ minWidth: "40px" }}>
-                <div 
-                  className={`h-12 w-10 border border-gray-300 flex items-center justify-center ${
-                    block.process ? block.process.color || 'bg-blue-100' : 'bg-gray-100'
-                  }`}
-                >
-                  {block.process ? block.process.name : '—'}
-                </div>
-                <div className="text-xs mt-1">{block.time}</div>
+        <div className="inline-flex min-w-full flex-col">
+          {/* CPU Labels */}
+          <div className="flex border-b mb-2">
+            <div className="w-16 flex-shrink-0"></div>
+            {Array.from({ length: state.cpuCount }).map((_, i) => (
+              <div key={i} className="font-medium px-2 py-1 text-center" style={{ minWidth: "40px" }}>
+                CPU {i + 1}
               </div>
             ))}
-            {/* Current time indicator */}
-            <div className="flex flex-col items-center" style={{ minWidth: "40px" }}>
-              <div className="h-12 w-10 border border-dashed border-gray-400 flex items-center justify-center bg-transparent">
+          </div>
+          
+          {/* Time rows */}
+          {executionHistory.map((entry, timeIndex) => (
+            <div key={timeIndex} className="flex items-center mb-1">
+              <div className="w-16 flex-shrink-0 text-right pr-2 text-sm font-medium">
+                Time {entry.time}
               </div>
-              <div className="text-xs mt-1">{state.currentTime}</div>
+              
+              {/* Processes for each CPU at this time */}
+              {Array.from({ length: state.cpuCount }).map((_, cpuIndex) => {
+                const process = cpuIndex < entry.processes.length ? entry.processes[cpuIndex] : null;
+                return (
+                  <div 
+                    key={cpuIndex} 
+                    className={`h-10 w-10 border border-gray-300 flex items-center justify-center ${
+                      process ? process.color || 'bg-blue-100' : 'bg-gray-100'
+                    }`}
+                    style={{ minWidth: "40px" }}
+                  >
+                    {process ? process.name : '—'}
+                  </div>
+                );
+              })}
             </div>
+          ))}
+          
+          {/* Current time indicator */}
+          <div className="flex items-center">
+            <div className="w-16 flex-shrink-0 text-right pr-2 text-sm font-medium">
+              Time {state.currentTime}
+            </div>
+            {Array.from({ length: state.cpuCount }).map((_, i) => (
+              <div 
+                key={i} 
+                className="h-10 w-10 border border-dashed border-gray-400 flex items-center justify-center bg-transparent"
+                style={{ minWidth: "40px" }}
+              ></div>
+            ))}
           </div>
         </div>
       </div>
